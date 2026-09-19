@@ -410,8 +410,8 @@ export const WhatsAppBotModal: React.FC<WhatsAppBotModalProps> = ({
             </div>
           )}
 
-          {/* Collapsible Debug & Diagnostics Section */}
-          <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
+          {/* Collapsible Debug & Diagnostics Section (hidden by default) */}
+          <div className="hidden border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
             <button
               type="button"
               onClick={() => setShowDebug(!showDebug)}
