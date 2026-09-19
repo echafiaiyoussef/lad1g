@@ -39,6 +39,7 @@ let isManualDisconnect = false;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let connectingPromise: Promise<WhatsAppBotStatus> | null = null;
 let saveCloudTimer: NodeJS.Timeout | null = null;
+let reconnectAttempts = 0;
 
 const sessionDir = path.join(process.cwd(), "whatsapp_session");
 
@@ -208,157 +209,251 @@ export function getWhatsAppStatus(): WhatsAppBotStatus {
   return { ...currentStatus };
 }
 
-export async function connectWhatsAppBot(): Promise<WhatsAppBotStatus> {
-  if (sock && currentStatus.isConnected) {
+export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBotStatus> {
+  if (!forceNewQR && sock && currentStatus.isConnected) {
     return getWhatsAppStatus();
   }
 
-  if (connectingPromise && currentStatus.isConnecting) {
+  if (!forceNewQR && connectingPromise && currentStatus.isConnecting) {
     return connectingPromise;
   }
 
-  // Before connecting, check if cloud backup exists and restore if needed
-  if (!hasExistingSession()) {
+  // If force requested or clean QR wanted, terminate existing socket and wipe session directory
+  if (forceNewQR) {
+    console.log("[WhatsApp Bot] Force new QR requested: clearing old session files and restarting socket...");
+    isManualDisconnect = true;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnectAttempts = 0;
+
+    if (sock) {
+      try {
+        sock.ev.removeAllListeners("connection.update");
+        sock.ev.removeAllListeners("creds.update");
+        sock.end(undefined);
+      } catch (e) {}
+      sock = null;
+    }
+
     try {
-      await restoreSessionFromCloud();
+      if (fs.existsSync(sessionDir)) {
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+      }
+      fs.mkdirSync(sessionDir, { recursive: true });
+    } catch (e) {
+      console.warn("[WhatsApp Bot] Could not wipe sessionDir:", e);
+    }
+
+    try {
+      await supabase
+        .from("settings")
+        .delete()
+        .in("key", ["whatsapp_bot_session_backup", "whatsapp_bot_status"]);
     } catch (e) {}
+
+    currentStatus = {
+      isConnected: false,
+      isConnecting: true,
+      qrCodeDataUrl: null,
+      userPhone: null,
+      userName: null,
+      error: null,
+      lastConnectedAt: null,
+    };
+  } else {
+    // Normal connect: try to restore cloud backup only if local session doesn't exist
+    if (!hasExistingSession()) {
+      try {
+        await restoreSessionFromCloud();
+      } catch (e) {}
+    }
   }
 
   isManualDisconnect = false;
   currentStatus.isConnecting = true;
   currentStatus.error = null;
 
-  connectingPromise = new Promise(async (resolve) => {
-    try {
-      ensureSessionDir();
-      const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+  connectingPromise = new Promise((resolve) => {
+    let resolved = false;
+    const safeResolve = (status: WhatsAppBotStatus) => {
+      if (!resolved) {
+        resolved = true;
+        resolve(status);
+      }
+    };
 
-      const logger = pino({ level: "silent" });
+    (async () => {
+      try {
+        ensureSessionDir();
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
-      sock = makeWASocket({
-        auth: state,
-        logger,
-        printQRInTerminal: false,
-        browser: ["نظام كاشير عود ونظافة", "Chrome", "1.0.0"],
-        connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        syncFullHistory: false,
-      });
+        const logger = pino({ level: "silent" });
 
-      sock.ev.on("creds.update", async () => {
-        try {
-          await saveCreds();
-          debouncedSaveSessionToCloud();
-        } catch (e) {
-          console.error("[WhatsApp Bot] creds save error:", e);
-        }
-      });
-
-      sock.ev.on("connection.update", async (update: Partial<ConnectionState>) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
+        // If old credentials exist but socket has already failed multiple times, wipe them to force QR
+        if (reconnectAttempts >= 3 && !currentStatus.isConnected) {
+          console.warn("[WhatsApp Bot] Multiple reconnect failures with old creds. Purging session to force QR code.");
           try {
-            const dataUrl = await QRCode.toDataURL(qr, {
-              margin: 2,
-              width: 300,
-              color: {
-                dark: "#0f172a",
-                light: "#ffffff",
-              },
-            });
-            currentStatus.qrCodeDataUrl = dataUrl;
-            currentStatus.isConnecting = true;
-            currentStatus.isConnected = false;
-          } catch (qrErr: any) {
-            console.error("Failed to render QR Code DataURL:", qrErr);
+            if (fs.existsSync(sessionDir)) {
+              fs.rmSync(sessionDir, { recursive: true, force: true });
+            }
+            fs.mkdirSync(sessionDir, { recursive: true });
+          } catch (e) {}
+          reconnectAttempts = 0;
+        }
+
+        // Close any prior socket before creating new one
+        if (sock) {
+          try {
+            sock.ev.removeAllListeners("connection.update");
+            sock.ev.removeAllListeners("creds.update");
+            sock.end(undefined);
+          } catch (e) {}
+          sock = null;
+        }
+
+        sock = makeWASocket({
+          auth: state,
+          logger,
+          printQRInTerminal: false,
+          browser: ["Ubuntu", "Chrome", "122.0.0"], // Standard ASCII browser identifier to prevent WhatsApp rejection
+          connectTimeoutMs: 60000,
+          defaultQueryTimeoutMs: 60000,
+          keepAliveIntervalMs: 30000,
+          syncFullHistory: false,
+        });
+
+        sock.ev.on("creds.update", async () => {
+          try {
+            await saveCreds();
+            debouncedSaveSessionToCloud();
+          } catch (e) {
+            console.error("[WhatsApp Bot] creds save error:", e);
           }
-        }
+        });
 
-        if (connection === "open") {
-          currentStatus.isConnected = true;
-          currentStatus.isConnecting = false;
-          currentStatus.qrCodeDataUrl = null;
-          currentStatus.error = null;
-          currentStatus.lastConnectedAt = new Date().toISOString();
+        sock.ev.on("connection.update", async (update: Partial<ConnectionState>) => {
+          const { connection, lastDisconnect, qr } = update;
 
-          const rawId = sock?.user?.id || "";
-          const phoneOnly = rawId.split(":")[0]?.split("@")[0] || "";
-          currentStatus.userPhone = phoneOnly ? `+${phoneOnly}` : "متصل";
-          currentStatus.userName = sock?.user?.name || "جوال المغسلة";
+          if (qr) {
+            try {
+              const dataUrl = await QRCode.toDataURL(qr, {
+                margin: 2,
+                width: 300,
+                color: {
+                  dark: "#0f172a",
+                  light: "#ffffff",
+                },
+              });
+              currentStatus.qrCodeDataUrl = dataUrl;
+              currentStatus.isConnecting = true;
+              currentStatus.isConnected = false;
+              currentStatus.error = null;
+              console.log("[WhatsApp Bot] Fresh QR code generated successfully.");
+              safeResolve(getWhatsAppStatus());
+            } catch (qrErr: any) {
+              console.error("[WhatsApp Bot] Failed to render QR Code DataURL:", qrErr);
+            }
+          }
 
-          console.log(`[WhatsApp Bot] Connected successfully as ${currentStatus.userPhone}`);
-          
-          // Immediate cloud persistence upon opening connection
-          saveSessionToCloud().catch(err => {
-            console.error("[WhatsApp Bot] Failed initial cloud session save:", err);
-          });
-
-          resolve(getWhatsAppStatus());
-        }
-
-        if (connection === "close") {
-          currentStatus.isConnected = false;
-          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-
-          console.log(`[WhatsApp Bot] Connection closed. Status: ${statusCode}, isLoggedOut: ${isLoggedOut}`);
-
-          if (isLoggedOut || isManualDisconnect) {
+          if (connection === "open") {
+            currentStatus.isConnected = true;
             currentStatus.isConnecting = false;
             currentStatus.qrCodeDataUrl = null;
-            currentStatus.userPhone = null;
-            currentStatus.userName = null;
-            try {
-              if (fs.existsSync(sessionDir)) {
-                fs.rmSync(sessionDir, { recursive: true, force: true });
-              }
-            } catch (e) {
-              console.error("Failed to remove session dir:", e);
-            }
+            currentStatus.error = null;
+            currentStatus.lastConnectedAt = new Date().toISOString();
+            reconnectAttempts = 0;
 
-            // Remove cloud backup if explicitly logged out or disconnected
-            try {
-              await supabase
-                .from("settings")
-                .delete()
-                .in("key", ["whatsapp_bot_session_backup", "whatsapp_bot_status"]);
-              console.log("[WhatsApp Bot] Removed session from Supabase cloud on logout.");
-            } catch (delErr) {
-              console.error("[WhatsApp Bot] Error deleting cloud session:", delErr);
-            }
+            const rawId = sock?.user?.id || "";
+            const phoneOnly = rawId.split(":")[0]?.split("@")[0] || "";
+            currentStatus.userPhone = phoneOnly ? `+${phoneOnly}` : "متصل";
+            currentStatus.userName = sock?.user?.name || "جوال المغسلة";
 
-            sock = null;
-            resolve(getWhatsAppStatus());
-          } else {
-            // Reconnect if connection was dropped unexpectedly
-            currentStatus.isConnecting = true;
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-            reconnectTimer = setTimeout(() => {
-              if (!isManualDisconnect) {
-                console.log("[WhatsApp Bot] Attempting auto-reconnect...");
-                connectWhatsAppBot();
-              }
-            }, 4000);
-            resolve(getWhatsAppStatus());
+            console.log(`[WhatsApp Bot] Connected successfully as ${currentStatus.userPhone}`);
+            
+            // Immediate cloud persistence upon opening connection
+            saveSessionToCloud().catch(err => {
+              console.error("[WhatsApp Bot] Failed initial cloud session save:", err);
+            });
+
+            safeResolve(getWhatsAppStatus());
           }
-        }
-      });
 
-      // Timeout safety: if after 4 seconds QR hasn't arrived, still return current status
-      setTimeout(() => {
-        resolve(getWhatsAppStatus());
-      }, 3500);
+          if (connection === "close") {
+            currentStatus.isConnected = false;
+            const err = lastDisconnect?.error as any;
+            const statusCode = err?.output?.statusCode || err?.statusCode;
+            const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403;
 
-    } catch (err: any) {
-      console.error("[WhatsApp Bot] Connection initialization error:", err);
-      currentStatus.isConnecting = false;
-      currentStatus.error = err?.message || "فشل بدء جلسة الواتساب";
-      resolve(getWhatsAppStatus());
-    } finally {
-      connectingPromise = null;
-    }
+            console.log(`[WhatsApp Bot] Connection closed. Status: ${statusCode}, isLoggedOut: ${isLoggedOut}`);
+
+            if (isLoggedOut || isManualDisconnect) {
+              currentStatus.isConnecting = false;
+              currentStatus.qrCodeDataUrl = null;
+              currentStatus.userPhone = null;
+              currentStatus.userName = null;
+              reconnectAttempts = 0;
+
+              try {
+                if (fs.existsSync(sessionDir)) {
+                  fs.rmSync(sessionDir, { recursive: true, force: true });
+                }
+              } catch (e) {
+                console.error("Failed to remove session dir:", e);
+              }
+
+              try {
+                await supabase
+                  .from("settings")
+                  .delete()
+                  .in("key", ["whatsapp_bot_session_backup", "whatsapp_bot_status"]);
+              } catch (delErr) {}
+
+              sock = null;
+              safeResolve(getWhatsAppStatus());
+            } else {
+              reconnectAttempts++;
+              if (reconnectAttempts > 4) {
+                console.warn("[WhatsApp Bot] Reconnection threshold reached. Clearing stale session files to allow new QR pairing.");
+                try {
+                  if (fs.existsSync(sessionDir)) {
+                    fs.rmSync(sessionDir, { recursive: true, force: true });
+                  }
+                } catch (e) {}
+                currentStatus.isConnecting = false;
+                currentStatus.error = "انتهت صلاحية جلسة الواتساب القديمة، يرجى طلب رمز QR جديد.";
+                safeResolve(getWhatsAppStatus());
+                return;
+              }
+
+              currentStatus.isConnecting = true;
+              if (reconnectTimer) clearTimeout(reconnectTimer);
+              reconnectTimer = setTimeout(() => {
+                if (!isManualDisconnect) {
+                  console.log(`[WhatsApp Bot] Attempting auto-reconnect (attempt ${reconnectAttempts})...`);
+                  connectWhatsAppBot();
+                }
+              }, 4000);
+              safeResolve(getWhatsAppStatus());
+            }
+          }
+        });
+
+        // Timeout safety: if after 6 seconds neither QR nor connection arrived, resolve current status
+        setTimeout(() => {
+          safeResolve(getWhatsAppStatus());
+        }, 6000);
+
+      } catch (err: any) {
+        console.error("[WhatsApp Bot] Connection initialization error:", err);
+        currentStatus.isConnecting = false;
+        currentStatus.error = err?.message || "فشل بدء جلسة الواتساب";
+        safeResolve(getWhatsAppStatus());
+      } finally {
+        connectingPromise = null;
+      }
+    })();
   });
 
   return connectingPromise;

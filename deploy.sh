@@ -19,10 +19,21 @@ npm run build
 
 echo "🔄 [4/4] Reloading PM2 process..."
 if command -v pm2 >/dev/null 2>&1; then
-  if [ -f ecosystem.config.cjs ]; then
-    pm2 reload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs
+  # Automatically resolve conflicts if both ghasil and laundry-app exist
+  if pm2 describe ghasil >/dev/null 2>&1 && pm2 describe laundry-app >/dev/null 2>&1; then
+    echo "⚠️ Detected duplicate 'laundry-app' process while 'ghasil' is active. Removing duplicate..."
+    pm2 stop laundry-app || true
+    pm2 delete laundry-app || true
+  fi
+
+  if pm2 describe ghasil >/dev/null 2>&1; then
+    pm2 restart ghasil --update-env
+  elif pm2 describe laundry-app >/dev/null 2>&1; then
+    pm2 restart laundry-app --update-env
+  elif [ -f ecosystem.config.cjs ]; then
+    pm2 start ecosystem.config.cjs
   else
-    pm2 reload "laundry-app" || pm2 start dist/server.cjs --name "laundry-app"
+    pm2 start dist/server.cjs --name "ghasil"
   fi
   pm2 save
   echo "✅ Application reloaded successfully!"

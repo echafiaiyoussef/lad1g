@@ -46,10 +46,22 @@ async function startServer() {
   // API Route - Connect WhatsApp Bot (get QR or existing connection)
   app.post("/api/whatsapp/connect", async (req, res) => {
     try {
-      const status = await connectWhatsAppBot();
+      const force = req.body?.force === true || req.query?.force === "true";
+      const status = await connectWhatsAppBot(force);
       res.json(status);
     } catch (error: any) {
       console.error("WhatsApp connect error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API Route - Reset / Force Fresh QR
+  app.post("/api/whatsapp/reset", async (req, res) => {
+    try {
+      const status = await connectWhatsAppBot(true);
+      res.json(status);
+    } catch (error: any) {
+      console.error("WhatsApp reset error:", error);
       res.status(500).json({ error: error.message });
     }
   });

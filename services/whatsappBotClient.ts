@@ -26,9 +26,13 @@ export async function getWhatsAppBotStatus(): Promise<WhatsAppBotStatus> {
   }
 }
 
-export async function connectWhatsAppBot(): Promise<WhatsAppBotStatus> {
+export async function connectWhatsAppBot(force = false): Promise<WhatsAppBotStatus> {
   try {
-    const res = await fetch('/api/whatsapp/connect', { method: 'POST' });
+    const res = await fetch(`/api/whatsapp/connect${force ? '?force=true' : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force }),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err: any) {
@@ -42,6 +46,10 @@ export async function connectWhatsAppBot(): Promise<WhatsAppBotStatus> {
       lastConnectedAt: null,
     };
   }
+}
+
+export async function resetWhatsAppBot(): Promise<WhatsAppBotStatus> {
+  return connectWhatsAppBot(true);
 }
 
 export async function disconnectWhatsAppBot(): Promise<WhatsAppBotStatus> {

@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'laundry-app',
+      name: process.env.APP_NAME || 'ghasil',
       script: 'dist/server.cjs',
       instances: 1, // Single instance required for WhatsApp Baileys socket state
       exec_mode: 'fork',

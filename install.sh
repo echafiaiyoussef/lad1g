@@ -167,10 +167,20 @@ echo -e "${GREEN}✓ تم اكتمال بناء الواجهة والخادم ب
 # Start / Reload Application via PM2
 # ------------------------------------------------------------------------------
 echo -e "\n${BLUE}تشغيل / تحديث التطبيق عبر PM2...${NC}"
-if [ -f ecosystem.config.cjs ]; then
-  pm2 reload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs
+if pm2 describe ghasil >/dev/null 2>&1 && pm2 describe laundry-app >/dev/null 2>&1; then
+  echo -e "${YELLOW}! تم اكتشاف عملية مكررة 'laundry-app' مع وجود 'ghasil'. جاري إيقاف المكررة...${NC}"
+  pm2 stop laundry-app || true
+  pm2 delete laundry-app || true
+fi
+
+if pm2 describe ghasil >/dev/null 2>&1; then
+  pm2 restart ghasil --update-env
+elif pm2 describe laundry-app >/dev/null 2>&1; then
+  pm2 restart laundry-app --update-env
+elif [ -f ecosystem.config.cjs ]; then
+  pm2 start ecosystem.config.cjs
 else
-  pm2 reload "laundry-app" || pm2 start dist/server.cjs --name "laundry-app"
+  pm2 start dist/server.cjs --name "ghasil"
 fi
 
 pm2 save

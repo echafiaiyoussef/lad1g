@@ -107,10 +107,10 @@ export const WhatsAppBotModal: React.FC<WhatsAppBotModalProps> = ({
     };
   }, [isOpen]);
 
-  const handleConnect = async () => {
+  const handleConnect = async (force = false) => {
     setLoading(true);
     try {
-      const res = await connectWhatsAppBot();
+      const res = await connectWhatsAppBot(force);
       setStatus(res);
       onStatusChange?.(res);
     } catch (e: any) {
@@ -255,6 +255,20 @@ export const WhatsAppBotModal: React.FC<WhatsAppBotModalProps> = ({
                 امسح الرمز من واتساب (الإعدادات &gt; الأجهزة المرتبطة &gt; ربط جهاز)
               </p>
 
+              {status.error && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs flex flex-col items-center gap-1.5 text-center">
+                  <span>{status.error}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleConnect(true)}
+                    disabled={loading}
+                    className="mt-1 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-[11px] transition-colors cursor-pointer"
+                  >
+                    حذف الجلسة القديمة وإنشاء رمز QR جديد
+                  </button>
+                </div>
+              )}
+
               <div className="relative inline-block p-3 bg-white rounded-xl shadow-sm border border-slate-200">
                 {status.qrCodeDataUrl ? (
                   <img
@@ -263,11 +277,19 @@ export const WhatsAppBotModal: React.FC<WhatsAppBotModalProps> = ({
                     className="w-48 h-48 mx-auto object-contain rounded-lg"
                   />
                 ) : (
-                  <div className="w-48 h-48 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <div className="w-48 h-48 flex flex-col items-center justify-center text-slate-400 gap-2 p-2 text-center">
                     <Loader2 size={28} className="animate-spin text-emerald-600" />
-                    <span className="text-xs font-bold">
-                      {status.isConnecting ? 'جاري الاتصال...' : 'جاري تجهيز رمز QR...'}
+                    <span className="text-xs font-bold text-slate-700">
+                      {status.isConnecting ? 'جاري تجهيز رمز QR...' : 'جاري الاتصال...'}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => handleConnect(true)}
+                      disabled={loading}
+                      className="mt-2 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+                    >
+                      طلب رمز جديد الآن
+                    </button>
                   </div>
                 )}
 
@@ -278,14 +300,15 @@ export const WhatsAppBotModal: React.FC<WhatsAppBotModalProps> = ({
                 )}
               </div>
 
-              <div>
+              <div className="flex justify-center gap-2">
                 <button
-                  onClick={handleConnect}
+                  type="button"
+                  onClick={() => handleConnect(true)}
                   disabled={loading}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 mx-auto transition-colors shadow-sm cursor-pointer"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
                 >
                   <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-                  تحديث الرمز
+                  تحديث / إنشاء رمز جديد
                 </button>
               </div>
             </div>
