@@ -10,6 +10,7 @@ import {
   sendWhatsAppMessageAndPdf,
   hasExistingSession,
   restoreSessionFromCloud,
+  getWhatsAppDiagnostics,
 } from "./services/whatsappBotServer";
 
 async function startServer() {
@@ -40,6 +41,17 @@ async function startServer() {
       res.json(status);
     } catch (error: any) {
       res.json(getWhatsAppStatus());
+    }
+  });
+
+  // API Route - WhatsApp Server Diagnostics and Debug Info
+  app.get("/api/whatsapp/debug", async (req, res) => {
+    try {
+      const diagnostics = await getWhatsAppDiagnostics();
+      res.json(diagnostics);
+    } catch (error: any) {
+      console.error("WhatsApp diagnostics error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch diagnostics" });
     }
   });
 

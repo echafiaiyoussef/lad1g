@@ -90,3 +90,49 @@ export async function sendWhatsAppBotMessage(params: {
     };
   }
 }
+
+export interface WhatsAppDiagnosticsReport {
+  timestamp: string;
+  status: WhatsAppBotStatus;
+  baileys: {
+    isMakeWASocketFunction: boolean;
+    isUseAuthStateFunction: boolean;
+    hasDisconnectReason: boolean;
+  };
+  system: {
+    nodeVersion: string;
+    platform: string;
+    arch: string;
+    uptimeSeconds: number;
+    memoryMb: number;
+    pid: number;
+  };
+  session: {
+    directory: string;
+    exists: boolean;
+    filesCount: number;
+    files: string[];
+    hasCreds: boolean;
+    reconnectAttempts: number;
+  };
+  cloudBackup: {
+    found: boolean;
+    updatedAt: string | null;
+  };
+  recentLogs: Array<{
+    time: string;
+    level: "info" | "warn" | "error";
+    message: string;
+  }>;
+}
+
+export async function getWhatsAppDiagnostics(): Promise<WhatsAppDiagnosticsReport | null> {
+  try {
+    const res = await fetch('/api/whatsapp/debug');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to load WhatsApp diagnostics:", err);
+    return null;
+  }
+}

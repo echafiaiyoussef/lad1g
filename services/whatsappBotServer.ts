@@ -1,14 +1,37 @@
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  WASocket,
-  ConnectionState
-} from "@whiskeysockets/baileys";
+import * as BaileysRaw from "@whiskeysockets/baileys";
+import type { WASocket, ConnectionState } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
 import fs from "fs";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
+
+/**
+ * Universal Baileys resolver that guarantees function availability
+ * across ESM, CommonJS, and esbuild bundled dist/server.cjs.
+ */
+export function getBaileys() {
+  const b = BaileysRaw as any;
+  const makeWASocket =
+    (typeof b.makeWASocket === "function" ? b.makeWASocket : null) ||
+    (typeof b.default === "function" ? b.default : null) ||
+    (typeof b.default?.default === "function" ? b.default.default : null) ||
+    (typeof b.default?.makeWASocket === "function" ? b.default.makeWASocket : null) ||
+    (typeof b === "function" ? b : null);
+
+  const useMultiFileAuthState =
+    (typeof b.useMultiFileAuthState === "function" ? b.useMultiFileAuthState : null) ||
+    (typeof b.default?.useMultiFileAuthState === "function" ? b.default.useMultiFileAuthState : null) ||
+    (typeof b.default?.default?.useMultiFileAuthState === "function" ? b.default.default.useMultiFileAuthState : null);
+
+  const DisconnectReason =
+    b.DisconnectReason ||
+    b.default?.DisconnectReason ||
+    b.default?.default?.DisconnectReason ||
+    { loggedOut: 401 };
+
+  return { makeWASocket, useMultiFileAuthState, DisconnectReason };
+}
 
 export interface WhatsAppBotStatus {
   isConnected: boolean;
@@ -18,6 +41,12 @@ export interface WhatsAppBotStatus {
   userName: string | null;
   error: string | null;
   lastConnectedAt: string | null;
+}
+
+export interface WhatsAppBotLogEntry {
+  time: string;
+  level: "info" | "warn" | "error";
+  message: string;
 }
 
 const SUPABASE_URL = "https://hoeealjgmfjbojjyodql.supabase.co";
@@ -40,6 +69,15 @@ let reconnectTimer: NodeJS.Timeout | null = null;
 let connectingPromise: Promise<WhatsAppBotStatus> | null = null;
 let saveCloudTimer: NodeJS.Timeout | null = null;
 let reconnectAttempts = 0;
+
+const botLogs: WhatsAppBotLogEntry[] = [];
+
+export function logBot(level: "info" | "warn" | "error", message: string) {
+  const time = new Date().toLocaleTimeString("ar-SA", { hour12: false });
+  botLogs.unshift({ time, level, message });
+  if (botLogs.length > 60) botLogs.pop();
+  console.log(`[WhatsApp Bot ${level.toUpperCase()}] ${message}`);
+}
 
 const sessionDir = path.join(process.cwd(), "whatsapp_session");
 
@@ -287,13 +325,22 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
     (async () => {
       try {
         ensureSessionDir();
-        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        logBot("info", "بدء تجهيز جلسة الواتساب ومحرك Baileys...");
 
+        const { makeWASocket, useMultiFileAuthState, DisconnectReason } = getBaileys();
+        if (typeof makeWASocket !== "function") {
+          throw new Error(`مكتبة Baileys makeWASocket غير متاحة كدالة (النوع: ${typeof makeWASocket})`);
+        }
+        if (typeof useMultiFileAuthState !== "function") {
+          throw new Error(`مكتبة Baileys useMultiFileAuthState غير متاحة كدالة (النوع: ${typeof useMultiFileAuthState})`);
+        }
+
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
         const logger = pino({ level: "silent" });
 
         // If old credentials exist but socket has already failed multiple times, wipe them to force QR
         if (reconnectAttempts >= 3 && !currentStatus.isConnected) {
-          console.warn("[WhatsApp Bot] Multiple reconnect failures with old creds. Purging session to force QR code.");
+          logBot("warn", "تجاوز محاولات الاتصال مع ملفات قديمة. جاري مسح الجلسة لإنشاء رمز QR جديد...");
           try {
             if (fs.existsSync(sessionDir)) {
               fs.rmSync(sessionDir, { recursive: true, force: true });
@@ -313,6 +360,7 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
           sock = null;
         }
 
+        logBot("info", "جاري إنشاء اتصال WASocket جديد...");
         sock = makeWASocket({
           auth: state,
           logger,
@@ -329,7 +377,7 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
             await saveCreds();
             debouncedSaveSessionToCloud();
           } catch (e) {
-            console.error("[WhatsApp Bot] creds save error:", e);
+            logBot("error", `خطأ أثناء حفظ بيانات الاعتماد: ${e}`);
           }
         });
 
@@ -350,10 +398,10 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
               currentStatus.isConnecting = true;
               currentStatus.isConnected = false;
               currentStatus.error = null;
-              console.log("[WhatsApp Bot] Fresh QR code generated successfully.");
+              logBot("info", "تم توليد رمز QR بنجاح، بانتظار مسحه من تطبيق واتساب.");
               safeResolve(getWhatsAppStatus());
             } catch (qrErr: any) {
-              console.error("[WhatsApp Bot] Failed to render QR Code DataURL:", qrErr);
+              logBot("error", `فشل تحويل رمز QR إلى صورة: ${qrErr.message}`);
             }
           }
 
@@ -370,11 +418,11 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
             currentStatus.userPhone = phoneOnly ? `+${phoneOnly}` : "متصل";
             currentStatus.userName = sock?.user?.name || "جوال المغسلة";
 
-            console.log(`[WhatsApp Bot] Connected successfully as ${currentStatus.userPhone}`);
+            logBot("info", `تم الاتصال بنجاح برقم: ${currentStatus.userPhone} (${currentStatus.userName})`);
             
             // Immediate cloud persistence upon opening connection
             saveSessionToCloud().catch(err => {
-              console.error("[WhatsApp Bot] Failed initial cloud session save:", err);
+              logBot("warn", `فشل حفظ الجلسة في السحابة: ${err}`);
             });
 
             safeResolve(getWhatsAppStatus());
@@ -386,7 +434,7 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
             const statusCode = err?.output?.statusCode || err?.statusCode;
             const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403;
 
-            console.log(`[WhatsApp Bot] Connection closed. Status: ${statusCode}, isLoggedOut: ${isLoggedOut}`);
+            logBot("warn", `أُغلق اتصال الواتساب. الرمز: ${statusCode}, تسجيل خروج: ${isLoggedOut}`);
 
             if (isLoggedOut || isManualDisconnect) {
               currentStatus.isConnecting = false;
@@ -415,7 +463,7 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
             } else {
               reconnectAttempts++;
               if (reconnectAttempts > 4) {
-                console.warn("[WhatsApp Bot] Reconnection threshold reached. Clearing stale session files to allow new QR pairing.");
+                logBot("error", "تجاوز حد محاولات إعادة الاتصال. يُرجى طلب رمز QR جديد.");
                 try {
                   if (fs.existsSync(sessionDir)) {
                     fs.rmSync(sessionDir, { recursive: true, force: true });
@@ -431,7 +479,7 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
               if (reconnectTimer) clearTimeout(reconnectTimer);
               reconnectTimer = setTimeout(() => {
                 if (!isManualDisconnect) {
-                  console.log(`[WhatsApp Bot] Attempting auto-reconnect (attempt ${reconnectAttempts})...`);
+                  logBot("info", `محاولة إعادة الاتصال التلقائي (${reconnectAttempts})...`);
                   connectWhatsAppBot();
                 }
               }, 4000);
@@ -446,7 +494,7 @@ export async function connectWhatsAppBot(forceNewQR = false): Promise<WhatsAppBo
         }, 6000);
 
       } catch (err: any) {
-        console.error("[WhatsApp Bot] Connection initialization error:", err);
+        logBot("error", `فشل بدء جلسة الواتساب: ${err?.message || err}`);
         currentStatus.isConnecting = false;
         currentStatus.error = err?.message || "فشل بدء جلسة الواتساب";
         safeResolve(getWhatsAppStatus());
@@ -624,5 +672,92 @@ export async function initWhatsAppBot() {
   } catch (e) {
     console.error("[WhatsApp Bot] Initialization error:", e);
   }
+}
+
+export interface WhatsAppDiagnosticsReport {
+  timestamp: string;
+  status: WhatsAppBotStatus;
+  baileys: {
+    isMakeWASocketFunction: boolean;
+    isUseAuthStateFunction: boolean;
+    hasDisconnectReason: boolean;
+  };
+  system: {
+    nodeVersion: string;
+    platform: string;
+    arch: string;
+    uptimeSeconds: number;
+    memoryMb: number;
+    pid: number;
+  };
+  session: {
+    directory: string;
+    exists: boolean;
+    filesCount: number;
+    files: string[];
+    hasCreds: boolean;
+    reconnectAttempts: number;
+  };
+  cloudBackup: {
+    found: boolean;
+    updatedAt: string | null;
+  };
+  recentLogs: WhatsAppBotLogEntry[];
+}
+
+export async function getWhatsAppDiagnostics(): Promise<WhatsAppDiagnosticsReport> {
+  const baileys = getBaileys();
+  const sessionExists = fs.existsSync(sessionDir);
+  let sessionFiles: string[] = [];
+  try {
+    if (sessionExists) sessionFiles = fs.readdirSync(sessionDir);
+  } catch (e: any) {
+    sessionFiles = [`خطأ في قراءة المجلد: ${e.message}`];
+  }
+
+  let cloudBackupFound = false;
+  let cloudBackupDate: string | null = null;
+  try {
+    const { data } = await supabase
+      .from("settings")
+      .select("value, updated_at")
+      .eq("key", "whatsapp_bot_session_backup")
+      .maybeSingle();
+    if (data?.value?.files?.["creds.json"]) {
+      cloudBackupFound = true;
+      cloudBackupDate = data.updated_at;
+    }
+  } catch (e) {}
+
+  return {
+    timestamp: new Date().toISOString(),
+    status: getWhatsAppStatus(),
+    baileys: {
+      isMakeWASocketFunction: typeof baileys.makeWASocket === "function",
+      isUseAuthStateFunction: typeof baileys.useMultiFileAuthState === "function",
+      hasDisconnectReason: typeof baileys.DisconnectReason === "object" && baileys.DisconnectReason !== null,
+    },
+    system: {
+      nodeVersion: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      uptimeSeconds: Math.floor(process.uptime()),
+      memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      pid: process.pid,
+    },
+    session: {
+      directory: sessionDir,
+      exists: sessionExists,
+      filesCount: sessionFiles.length,
+      files: sessionFiles.slice(0, 20),
+      hasCreds: sessionFiles.includes("creds.json"),
+      reconnectAttempts,
+    },
+    cloudBackup: {
+      found: cloudBackupFound,
+      updatedAt: cloudBackupDate,
+    },
+    recentLogs: botLogs.slice(0, 30),
+  };
 }
 
