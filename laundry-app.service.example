@@ -1,0 +1,30 @@
+# ==============================================================================
+# Example Linux systemd service configuration
+# Place in: /etc/systemd/system/laundry-app.service
+#
+# Commands to enable & start:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable laundry-app
+#   sudo systemctl start laundry-app
+#   sudo systemctl status laundry-app
+# ==============================================================================
+
+[Unit]
+Description=Smart Laundry Management System (Ghasil Cloud)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/laundry-app
+ExecStart=/usr/bin/node dist/server.cjs
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=laundry-app
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target

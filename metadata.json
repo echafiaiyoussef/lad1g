@@ -1,0 +1,10 @@
+{
+  "name": "Remix Remix Remix Remix Remix Remix Remix Remix Remix Remix Remix Remix: Remix: Remix: Remix: Remix: Remix: Remix: Remix: Remix: مغلسة نظافة وعود",
+  "description": "نظام كاشير ذكي لمغاسل الملابس يدعم إشعارات واتساب، تتبع الحالات، إدارة المخزون، والتقارير المالية.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

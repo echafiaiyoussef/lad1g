@@ -1,0 +1,21 @@
+services:
+  laundry-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: laundry-system
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      # Persist WhatsApp session files across container restarts
+      - laundry_whatsapp_session:/app/whatsapp_session
+      - ./logs:/app/logs
+
+volumes:
+  laundry_whatsapp_session:
+    name: laundry_whatsapp_session

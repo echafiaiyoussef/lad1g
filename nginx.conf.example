@@ -1,0 +1,44 @@
+# ==============================================================================
+# Example Nginx Reverse Proxy Configuration
+# Location on server: /etc/nginx/sites-available/laundry-app
+# ==============================================================================
+
+# Redirect HTTP to HTTPS (uncomment after installing SSL certificate)
+# server {
+#     listen 80;
+#     server_name your-domain.com www.your-domain.com;
+#     return 301 https://$host$request_uri;
+# }
+
+server {
+    listen 80;
+    server_name your-domain.com www.your-domain.com;
+
+    # Allow large payload uploads (PDF invoices, customer image tags, receipts)
+    client_max_body_size 50M;
+
+    # Gzip Compression for fast delivery
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
+    gzip_min_length 256;
+
+    # Reverse Proxy to Express & Vite App on port 3000
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        # WebSocket support (Required for real-time status and HMR / Baileys events)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts for longer requests (such as AI summaries or PDF generation)
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}

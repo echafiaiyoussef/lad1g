@@ -1,11 +1,45 @@
-<div align="center">
+# مغسلة عود ونظافة - نظام إدارة المغاسل المتكامل (Ghasil Cloud)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+نظام سحابي وهجين ذكي لإدارة مغاسل الملابس والمصابغ، يدعم نقاط البيع (POS)، تتبع الطلبات، فواتير QR معتمدة، إشعارات وتكامل واتساب عبر Baileys، إدارة المخزون، والعمل أوفلاين 100%.
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 🚀 التثبيت والتشغيل على سيرفرك الخاص (Self-Hosting Deployment)
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+تم توفير جميع الأدوات والملفات لتثبيت المشروع بسهولة على أي سيرفر خاص (VPS / Ubuntu / Debian / Dedicated / Docker):
 
-</div>
+| الملف | الوصف والوظيفة |
+|---|---|
+| **`INSTALL_COMMANDS.md`** | **الدليل الكامل لجميع أوامر التيرمنال خطوة بخطوة بالتفصيل** |
+| **`install.sh`** | **سكربت التثبيت والبناء التلقائي بضغطة زر واحدة على السيرفر** |
+| **`deploy.sh`** | **سكربت التحديث وإعادة البناء السريع عند تعديل الكود** |
+| **`ecosystem.config.cjs`** | **ملف إعدادات مدير العمليات PM2 للإنتاج** |
+| **`Dockerfile` & `docker-compose.yml`** | **تشغيل النظام بالكامل عبر حاويات Docker** |
+| **`nginx.conf.example`** | **نموذج إعداد خادم Nginx مع دعم WebSockets وشهادة SSL** |
+| **`laundry-app.service.example`** | **نموذج خدمة systemd لتشغيل الخادم كخدمة نظام** |
+
+---
+
+## ⚡ التثبيت السريع عبر سطر الأوامر (Quick Install)
+
+على سيرفرك بنظام Ubuntu / Debian:
+
+```bash
+chmod +x install.sh
+sudo ./install.sh
+```
+
+أو يدوياً:
+
+```bash
+# 1. تثبيت الحزم
+npm install
+
+# 2. بناء المشروع للإنتاج
+npm run build
+
+# 3. تشغيل الخادم في الخلفية
+npm run pm2:start
+```
+
+للاطلاع على الشرح الكامل لجميع خيارات التثبيت والأوامر، راجع: **`INSTALL_COMMANDS.md`**.
